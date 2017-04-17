@@ -512,10 +512,8 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
     
     private boolean isDebianInterfaceCommandOption (String line) {
     	boolean ret = false;
-    	s_logger.warn("<IAB> [+] isDebianInterfaceCommandOption() line={}", line);
     	for (String debIfaceCmdOp : debianInterfaceComandOptions) {
     		if (line.startsWith(debIfaceCmdOp)) {
-    			s_logger.warn("<IAB> [!] isDebianInterfaceCommandOption() - YES");
     			ret = true;
     			break;
     		}
@@ -528,7 +526,6 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
 				}
 			}
     	}
-    	s_logger.warn("<IAB> [-] isDebianInterfaceCommandOption() line={}", line);
     	return ret;
     }
 
