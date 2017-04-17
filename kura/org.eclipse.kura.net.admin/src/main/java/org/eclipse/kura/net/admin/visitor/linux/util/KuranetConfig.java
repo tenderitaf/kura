@@ -59,7 +59,7 @@ public class KuranetConfig {
     }
 
     public static Properties getProperties() {
-        Properties kuraExtendedProps = null;
+        Properties kuraExtendedProps = new Properties();
 
         s_logger.debug("Getting {}", KURANET_FILENAME);
 
@@ -67,7 +67,6 @@ public class KuranetConfig {
 
         if (kuranetFile.exists()) {
             // found our match so load the properties
-            kuraExtendedProps = new Properties();
             FileInputStream fis = null;
             try {
                 fis = new FileInputStream(kuranetFile);
@@ -94,7 +93,7 @@ public class KuranetConfig {
         String value = null;
 
         Properties props = KuranetConfig.getProperties();
-        if (props != null) {
+        if (!props.isEmpty()) {
             value = props.getProperty(key);
             s_logger.debug("Got property " + key + " :: " + value);
         }
@@ -105,7 +104,7 @@ public class KuranetConfig {
     public static void storeProperties(Properties props) throws IOException, KuraException {
         Properties oldProperties = KuranetConfig.getProperties();
 
-        if (oldProperties == null || !oldProperties.equals(props)) {
+        if (!oldProperties.equals(props)) {
             FileOutputStream fos = null;
             try {
                 fos = new FileOutputStream(KURANET_TMP_FILENAME);
@@ -128,7 +127,9 @@ public class KuranetConfig {
                     s_logger.info("Not rewriting kuranet props file because it is the same");
                 }
             } finally {
-                fos.close();
+            	if (fos != null) {
+            		fos.close();
+            	}
             }
         }
     }
@@ -137,10 +138,6 @@ public class KuranetConfig {
         s_logger.debug("Setting property " + key + " :: " + value);
         Properties properties = KuranetConfig.getProperties();
 
-        if (properties == null) {
-            properties = new Properties();
-        }
-
         properties.setProperty(key, value);
         KuranetConfig.storeProperties(properties);
     }
@@ -148,7 +145,7 @@ public class KuranetConfig {
     public static void deleteProperty(String key) throws IOException, KuraException {
         Properties properties = KuranetConfig.getProperties();
 
-        if (properties != null) {
+        if (!properties.isEmpty()) {
             if (properties.containsKey(key)) {
                 s_logger.debug("Deleting property {}", key);
                 properties.remove(key);
