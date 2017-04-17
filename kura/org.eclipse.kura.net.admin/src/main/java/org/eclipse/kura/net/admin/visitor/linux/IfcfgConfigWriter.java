@@ -17,6 +17,8 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import java.util.Scanner;
@@ -34,13 +36,9 @@ import org.eclipse.kura.net.NetInterfaceAddressConfig;
 import org.eclipse.kura.net.NetInterfaceConfig;
 import org.eclipse.kura.net.NetInterfaceStatus;
 import org.eclipse.kura.net.NetInterfaceType;
-import org.eclipse.kura.net.NetworkAdminService;
 import org.eclipse.kura.net.admin.visitor.linux.util.KuranetConfig;
 import org.eclipse.kura.net.wifi.WifiInterfaceAddressConfig;
 import org.eclipse.kura.net.wifi.WifiMode;
-import org.osgi.framework.BundleContext;
-import org.osgi.framework.FrameworkUtil;
-import org.osgi.framework.ServiceReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,15 +50,20 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
     private static final String REDHAT_NET_CONFIGURATION_DIRECTORY = "/etc/sysconfig/network-scripts/";
     private static final String DEBIAN_NET_CONFIGURATION_FILE = "/etc/network/interfaces";
     private static final String DEBIAN_TMP_NET_CONFIGURATION_FILE = "/etc/network/interfaces.tmp";
+    
+    private static final String LOCALHOST = "127.0.0.1";
 
-    private static IfcfgConfigWriter s_instance;
+    private static IfcfgConfigWriter instance;
+    
+    private static List<String> debianInterfaceComandOptions = new ArrayList<>(Arrays.asList("pre-up", "up", "post-up", "pre-down", "down", "post-down"));
+    private static List<String> debianIgnoreInterfaceCommands = new ArrayList<>(Arrays.asList("post-up route del default dev"));
 
     public static IfcfgConfigWriter getInstance() {
-        if (s_instance == null) {
-            s_instance = new IfcfgConfigWriter();
+        if (instance == null) {
+            instance = new IfcfgConfigWriter();
         }
 
-        return s_instance;
+        return instance;
     }
 
     @Override
@@ -88,12 +91,11 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                 || OS_VERSION.equals(KuraConstants.ReliaGATE_50_21_Ubuntu.getImageName() + "_"
                         + KuraConstants.ReliaGATE_50_21_Ubuntu.getImageVersion())) {
             NetInterfaceType type = netInterfaceConfig.getType();
-            if (type == NetInterfaceType.LOOPBACK || type == NetInterfaceType.ETHERNET
-                    || type == NetInterfaceType.WIFI) {
-                if (configHasChanged(netInterfaceConfig)) {
-                    writeDebianConfig(netInterfaceConfig);
-                }
-            }
+			if ((type == NetInterfaceType.LOOPBACK || type == NetInterfaceType.ETHERNET
+					|| type == NetInterfaceType.WIFI) && configHasChanged(netInterfaceConfig)) {
+				writeDebianConfig(netInterfaceConfig);
+
+			}
         } else {
             writeRedhatConfig(netInterfaceConfig);
         }
@@ -102,15 +104,15 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
     private void writeRedhatConfig(NetInterfaceConfig<? extends NetInterfaceAddressConfig> netInterfaceConfig)
             throws KuraException {
         String interfaceName = netInterfaceConfig.getName();
-        String outputFileName = new StringBuffer().append(REDHAT_NET_CONFIGURATION_DIRECTORY).append("ifcfg-")
+        String outputFileName = new StringBuilder().append(REDHAT_NET_CONFIGURATION_DIRECTORY).append("ifcfg-")
                 .append(interfaceName).toString();
-        String tmpOutputFileName = new StringBuffer().append(REDHAT_NET_CONFIGURATION_DIRECTORY).append("ifcfg-")
+        String tmpOutputFileName = new StringBuilder().append(REDHAT_NET_CONFIGURATION_DIRECTORY).append("ifcfg-")
                 .append(interfaceName).append(".tmp").toString();
         s_logger.debug("Writing config for {}", interfaceName);
 
         NetInterfaceType type = netInterfaceConfig.getType();
         if (type == NetInterfaceType.ETHERNET || type == NetInterfaceType.WIFI || type == NetInterfaceType.LOOPBACK) {
-            StringBuffer sb = new StringBuffer();
+            StringBuilder sb = new StringBuilder();
             sb.append("# Networking Interface\n");
 
             // DEVICE
@@ -181,7 +183,7 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
 
                             // DNS
                             List<? extends IPAddress> dnsAddresses = ((NetConfigIP4) netConfig).getDnsServers();
-                            if (dnsAddresses != null && dnsAddresses.size() > 0) {
+                            if (dnsAddresses != null && !dnsAddresses.isEmpty()) {
                                 for (int i = 0; i < dnsAddresses.size(); i++) {
                                     IPAddress ipAddr = dnsAddresses.get(i);
                                     if (!(ipAddr.isLoopbackAddress() || ipAddr.isLinkLocalAddress()
@@ -198,7 +200,7 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                         }
                     }
                 } else {
-                    s_logger.debug("netConfigs is null");
+                    s_logger.debug("writeRedhatConfig() :: netConfigs is null");
                 }
 
                 // WIFI
@@ -235,13 +237,14 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                     pw.flush();
                     fos.getFD().sync();
                 } catch (Exception e) {
-                    throw new KuraException(KuraErrorCode.INTERNAL_ERROR, e);
+                	s_logger.error("Failed to write redhat config file ", e);
+                	throw KuraException.internalError(e.getMessage());
                 } finally {
                     if (fos != null) {
                         try {
                             fos.close();
                         } catch (IOException ex) {
-                            s_logger.error("I/O Exception while closing BufferedReader!");
+                            s_logger.error("I/O Exception while closing BufferedReader! ", ex);
                         }
                     }
                     if (pw != null) {
@@ -267,7 +270,8 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                                 + " because it is the same");
                     }
                 } catch (IOException e) {
-                    throw new KuraException(KuraErrorCode.INTERNAL_ERROR, e);
+                	s_logger.error("Failed to rename redhat configuration file {} to {} ", tmpFile.getName(), outputFile.getName(), e);
+                	throw KuraException.internalError(e.getMessage());
                 }
             } else {
                 s_logger.warn("writeNewConfig :: operation is not allowed");
@@ -277,7 +281,7 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
 
     private void writeDebianConfig(NetInterfaceConfig<? extends NetInterfaceAddressConfig> netInterfaceConfig)
             throws KuraException {
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
         File kuraFile = new File(DEBIAN_NET_CONFIGURATION_FILE);
         String iName = netInterfaceConfig.getName();
         boolean appendConfig = true;
@@ -308,7 +312,10 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                                     sb.append(debianWriteUtility(netInterfaceConfig, iName));
 
                                     // remove old config lines from the scanner
-                                    while (scanner.hasNextLine() && !(line = scanner.nextLine()).isEmpty()) {
+                                    while (scanner.hasNextLine() && !(line = scanner.nextLine().trim()).isEmpty()) {
+                                    	if (isDebianInterfaceCommandOption(line)) {
+                                    		sb.append("\t").append(line).append("\n");
+                                    	}
                                     }
                                     sb.append("\n");
                                 } else {
@@ -323,7 +330,8 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                     }
                 }
             } catch (FileNotFoundException e1) {
-                throw new KuraException(KuraErrorCode.INTERNAL_ERROR, e1);
+            	s_logger.error("Debian config file is not found ", e1);
+            	throw KuraException.internalError(e1.getMessage());
             } finally {
                 scanner.close();
                 scanner = null;
@@ -350,13 +358,14 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                 pw.flush();
                 fos.getFD().sync();
             } catch (Exception e) {
-                throw new KuraException(KuraErrorCode.INTERNAL_ERROR, e);
+            	s_logger.error("Failed to write debian configuration file ", e);
+            	throw KuraException.internalError(e.getMessage());
             } finally {
                 if (fos != null) {
                     try {
                         fos.close();
                     } catch (IOException ex) {
-                        s_logger.error("I/O Exception while closing BufferedReader!");
+                        s_logger.error("I/O Exception while closing BufferedReader! ", ex);
                     }
                 }
                 if (pw != null) {
@@ -380,7 +389,8 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                     s_logger.info("Not rewriting network interfaces file because it is the same");
                 }
             } catch (IOException e) {
-                throw new KuraException(KuraErrorCode.INTERNAL_ERROR, e);
+            	s_logger.error("Failed to rename debian tmp config file {} to {} ", tmpFile.getName(), file.getName(), e);
+            	throw KuraException.internalError(e.getMessage());
             }
         }
     }
@@ -390,7 +400,7 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
 
         List<? extends NetInterfaceAddressConfig> netInterfaceAddressConfigs = netInterfaceConfig
                 .getNetInterfaceAddresses();
-        StringBuffer sb = new StringBuffer();
+        StringBuilder sb = new StringBuilder();
 
         s_logger.debug(
                 "There are " + netInterfaceAddressConfigs.size() + " NetInterfaceAddressConfigs in this configuration");
@@ -452,7 +462,7 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                         } else {
                             // DEFROUTE
                             if (((NetConfigIP4) netConfig).getStatus() == NetInterfaceStatus.netIPv4StatusEnabledLAN) {
-                                sb.append("post-up route del default dev ");
+                                sb.append("\tpost-up route del default dev ");
                                 sb.append(interfaceName);
                                 sb.append("\n");
                             }
@@ -463,7 +473,7 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                         if (!dnsAddresses.isEmpty()) {
                             boolean setDns = false;
                             for (int i = 0; i < dnsAddresses.size(); i++) {
-                                if (!dnsAddresses.get(i).getHostAddress().equals("127.0.0.1")) {
+                                if (!dnsAddresses.get(i).getHostAddress().equals(LOCALHOST)) {
                                     if (!setDns) {
                                         /*
                                          * IAB:
@@ -489,7 +499,7 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                     }
                 }
             } else {
-                s_logger.debug("netConfigs is null");
+                s_logger.debug("debianWriteUtility() :: netConfigs is null");
             }
 
             // WIFI
@@ -498,6 +508,28 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
             }
         }
         return sb.toString();
+    }
+    
+    private boolean isDebianInterfaceCommandOption (String line) {
+    	boolean ret = false;
+    	s_logger.warn("<IAB> [+] isDebianInterfaceCommandOption() line={}", line);
+    	for (String debIfaceCmdOp : debianInterfaceComandOptions) {
+    		if (line.startsWith(debIfaceCmdOp)) {
+    			s_logger.warn("<IAB> [!] isDebianInterfaceCommandOption() - YES");
+    			ret = true;
+    			break;
+    		}
+    	}
+    	if (ret) {
+    		for (String debIgnoreIfaceCmd : debianIgnoreInterfaceCommands) {
+				if (line.startsWith(debIgnoreIfaceCmd)) {
+					ret = false;
+					break;
+				}
+			}
+    	}
+    	s_logger.warn("<IAB> [-] isDebianInterfaceCommandOption() line={}", line);
+    	return ret;
     }
 
     public static void writeKuraExtendedConfig(
@@ -509,10 +541,10 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
         List<? extends NetInterfaceAddressConfig> netInterfaceAddressConfigs = netInterfaceConfig
                 .getNetInterfaceAddresses();
 
-        if (netInterfaceAddressConfigs != null && netInterfaceAddressConfigs.size() > 0) {
+        if (netInterfaceAddressConfigs != null && !netInterfaceAddressConfigs.isEmpty()) {
             for (NetInterfaceAddressConfig netInterfaceAddressConfig : netInterfaceAddressConfigs) {
                 List<NetConfig> netConfigs = netInterfaceAddressConfig.getConfigs();
-                if (netConfigs != null && netConfigs.size() > 0) {
+                if (netConfigs != null && !netConfigs.isEmpty()) {
                     for (int i = 0; i < netConfigs.size(); i++) {
                         NetConfig netConfig = netConfigs.get(i);
                         if (netConfig instanceof NetConfigIP4) {
@@ -533,20 +565,16 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
         // set it all
         Properties kuraExtendedProps = KuranetConfig.getProperties();
 
-        if (kuraExtendedProps == null) {
-            s_logger.debug("kuraExtendedProps was null");
-            kuraExtendedProps = new Properties();
-        }
-        StringBuilder sb = new StringBuilder().append("net.interface.").append(netInterfaceConfig.getName())
-                .append(".config.ip4.status");
-        kuraExtendedProps.put(sb.toString(), netInterfaceStatus.toString());
-
         // write it
-        if (kuraExtendedProps != null && !kuraExtendedProps.isEmpty()) {
+        if (!kuraExtendedProps.isEmpty()) {
+        	StringBuilder sb = new StringBuilder().append("net.interface.").append(netInterfaceConfig.getName())
+                    .append(".config.ip4.status");
+            kuraExtendedProps.put(sb.toString(), netInterfaceStatus.toString());
             try {
                 KuranetConfig.storeProperties(kuraExtendedProps);
             } catch (IOException e) {
-                throw new KuraException(KuraErrorCode.INTERNAL_ERROR, e);
+            	s_logger.error("Failed to store properties in the kuranet.conf file ", e);
+            	throw KuraException.internalError(e.getMessage());
             }
         }
     }
@@ -557,25 +585,11 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                     .append(".config.ip4.status");
             KuranetConfig.deleteProperty(sb.toString());
         } catch (IOException e) {
-            throw new KuraException(KuraErrorCode.INTERNAL_ERROR, e);
+        	s_logger.error("Failed to remove net.interface..config.ip4.status property from the kuranet.conf file ", e);
+        	throw KuraException.internalError(e.getMessage());
         }
     }
-
-    private void disableInterface(String interfaceName) {
-        BundleContext bundleContext = FrameworkUtil.getBundle(getClass()).getBundleContext();
-        if (bundleContext != null) {
-            ServiceReference<NetworkAdminService> sr = bundleContext.getServiceReference(NetworkAdminService.class);
-            if (sr != null) {
-                NetworkAdminService nas = bundleContext.getService(sr);
-                try {
-                    nas.disableInterface(interfaceName);
-                } catch (KuraException e) {
-                    s_logger.warn("Could not disable " + interfaceName, e);
-                }
-            }
-        }
-    }
-
+ 
     private Properties parseNetInterfaceAddressConfig(NetInterfaceAddressConfig netInterfaceAddressConfig) {
         Properties props = new Properties();
 
@@ -625,7 +639,7 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
                     List<? extends IPAddress> dnsAddresses = ((NetConfigIP4) netConfig).getDnsServers();
                     if (!dnsAddresses.isEmpty()) {
                         for (int i = 0; i < dnsAddresses.size(); i++) {
-                            if (!dnsAddresses.get(i).getHostAddress().equals("127.0.0.1")) {
+                            if (!dnsAddresses.get(i).getHostAddress().equals(LOCALHOST)) {
                                 props.setProperty("DNS" + Integer.toString(i + 1),
                                         dnsAddresses.get(i).getHostAddress());
                             }
@@ -644,12 +658,10 @@ public class IfcfgConfigWriter implements NetworkConfigurationVisitor {
             throws KuraException {
         Properties oldConfig = IfcfgConfigReader.parseDebianConfigFile(new File(DEBIAN_NET_CONFIGURATION_FILE),
                 netInterfaceConfig.getName());
-        Properties newConfig = parseNetInterfaceAddressConfig(netInterfaceConfig.getNetInterfaceAddresses().get(0));	// FIXME:
-        // assumes
-        // only
-        // one
-        // addressConfig
-
+        
+		// FIXME: assumes only one addressConfig
+        Properties newConfig = parseNetInterfaceAddressConfig(netInterfaceConfig.getNetInterfaceAddresses().get(0));	
+        
         s_logger.debug("Comparing configs for {}", netInterfaceConfig.getName());
         s_logger.debug("oldProps: {}", oldConfig);
         s_logger.debug("newProps: {}", newConfig);
