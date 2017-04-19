@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (c) 2011, 2016 Eurotech and others
+ * Copyright (c) 2011, 2017 Eurotech and others
  *
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
@@ -90,14 +90,9 @@ public class KuranetConfig {
     }
 
     public static String getProperty(String key) {
-        String value = null;
-
         Properties props = KuranetConfig.getProperties();
-        if (!props.isEmpty()) {
-            value = props.getProperty(key);
-            s_logger.debug("Got property " + key + " :: " + value);
-        }
-
+        String value = props.getProperty(key);
+        s_logger.debug("Got property {} :: {}", key, value);
         return value;
     }
 
@@ -127,9 +122,9 @@ public class KuranetConfig {
                     s_logger.info("Not rewriting kuranet props file because it is the same");
                 }
             } finally {
-            	if (fos != null) {
-            		fos.close();
-            	}
+                if (fos != null) {
+                    fos.close();
+                }
             }
         }
     }
@@ -144,15 +139,12 @@ public class KuranetConfig {
 
     public static void deleteProperty(String key) throws IOException, KuraException {
         Properties properties = KuranetConfig.getProperties();
-
-        if (!properties.isEmpty()) {
-            if (properties.containsKey(key)) {
-                s_logger.debug("Deleting property {}", key);
-                properties.remove(key);
-                KuranetConfig.storeProperties(properties);
-            } else {
-                s_logger.debug("Property does not exist {}", key);
-            }
+        if (properties.containsKey(key)) {
+            s_logger.debug("Deleting property {}", key);
+            properties.remove(key);
+            KuranetConfig.storeProperties(properties);
+        } else {
+            s_logger.debug("Property does not exist {}", key);
         }
     }
 }
